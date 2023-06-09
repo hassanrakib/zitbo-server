@@ -20,6 +20,27 @@ const client = new MongoClient(uri, {
 app.use(cors());
 app.use(express.json());
 
+// verify jwt token that comes from client side with http request
+const verifyJWT = (req, res, next) => {
+  const authorizationHeader = req.headers?.authorization;
+
+  // if no authorization header then the request is unauthorized
+  if(!authorizationHeader) return res.status(401).send({message: 'Unauthorized Access'});
+
+  const token = authorizationHeader.split(" ")[1];
+
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    // if err in verifying the token
+    if (err) return res.status(403).send({message: 'Access Forbidden'});
+
+    // if successful in verifying the token with the secret key
+    req.decoded = decoded;
+    // call the next handler of the route
+    next(); 
+  })
+
+}
+
 async function run() {
   try {
     // connect to db and get a message
@@ -60,7 +81,7 @@ async function run() {
     });
 
     // get user after successful sign in to firebase with verified email
-    app.get("/users/:username", async (req, res) => {
+    app.get("/users/:username", verifyJWT, async (req, res) => {
       const username = req.params.username;
 
       // check if user exists in db
@@ -71,19 +92,21 @@ async function run() {
 
     // after first time authentication
     // send back a signed JSON payload aka JWT token to client for later authorization in server
-    app.post("/jwt", async (req, res) => {
-      const userFromClient = req.body;
+    app.get("/jwt", async (req, res) => {
+      const username = req.query.username;
 
-      const userFromDB = await users.findOne({username: userFromClient.username});
+      const userFromDB = await users.findOne({ username });
 
-      if(userFromDB) {
-        const token = jwt.sign({username: userFromDB.username}, process.env.ACCESS_TOKEN_SECRET, {expiresIn: "7d"});
-        res.send({token});
+      // check that the requested user exists in my db
+      if (userFromDB) {
+        const token = jwt.sign({ username }, process.env.ACCESS_TOKEN_SECRET, {
+          expiresIn: "7d",
+        });
+        return res.send({ token });
       }
-    })
-    
 
-
+      res.status(403).send({ token: "" });
+    });
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
