@@ -43,14 +43,41 @@ const client = new MongoClient(uri, {
 app.use(cors());
 app.use(express.json());
 
+// socket server middlewares
+// this is executed only for the first time at the time of connecting
+io.use((socket, next) => {
+  const tokenBearer = socket.handshake?.auth?.token;
+
+  if (tokenBearer) {
+    // if token exists then get only the token by removing the 'Bearer'
+    const token = tokenBearer.split(" ")[1];
+
+    // verify token
+    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+      if (err) {
+        // call the next function with the err
+        // this will prevent the socket being connect to the server
+        // also emits "connect_error" event to the client
+        next(err);
+      } else {
+        // add a property to the socket
+        // that holds the decoded data (authentication payload) after verifying the token
+        socket.decoded = decoded;
+        next();
+      }
+    });
+  }
+});
+
 // verify jwt token that comes from client side with http request
-const verifyJWT = (req, res, next) => {
+function verifyJWT(req, res, next) {
   const authorizationHeader = req.headers?.authorization;
 
   // if no authorization header then the request is unauthorized
   if (!authorizationHeader)
     return res.status(401).send({ message: "Unauthorized Access" });
 
+  // get the token only be removing the 'Bearer'
   const token = authorizationHeader.split(" ")[1];
 
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
@@ -62,7 +89,7 @@ const verifyJWT = (req, res, next) => {
     // call the next handler of the route
     next();
   });
-};
+}
 
 async function run() {
   try {
@@ -77,6 +104,7 @@ async function run() {
     // database and collections
     const db = client.db("zitbo-1_db-1");
     const users = db.collection("users");
+    const tasks = db.collection("tasks");
 
     // ********************
 
@@ -126,6 +154,7 @@ async function run() {
 
       // check that the requested user exists in my db
       if (userFromDB) {
+        // sign a token with the payload and secret key and some options
         const token = jwt.sign({ username }, process.env.ACCESS_TOKEN_SECRET, {
           expiresIn: "7d",
         });
@@ -142,10 +171,21 @@ async function run() {
     // ********************
 
     io.on("connection", (socket) => {
-      console.log('New user connected...');
-    })
+      console.log("New user connected...", socket.decoded);
+
+      // listen to the task:create event to save new task to db
+      // and send response if successfuly saved
+      socket.on("task:create", async (newTask, callback) => {
+        // insert the newTask to tasks collection
+        const result = await tasks.insertOne(newTask);
+        if (result.acknowledged) {
+          // response after successful operation
+          callback({success: "Successfuly created the new task"});
+        }
+      });
 
 
+    });
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
