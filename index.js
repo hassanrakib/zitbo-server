@@ -10,6 +10,8 @@ const { MongoClient, ServerApiVersion } = require("mongodb");
 const cors = require("cors");
 // jsonwebtoken package for jwt token implementation
 const jwt = require("jsonwebtoken");
+// date functions
+const { startOfToday } = require("date-fns");
 // dot env package for .env file usage
 require("dotenv").config();
 
@@ -46,27 +48,24 @@ app.use(express.json());
 // socket server middlewares
 // this is executed only for the first time at the time of connecting
 io.use((socket, next) => {
-  const tokenBearer = socket.handshake?.auth?.token;
+  // get the token by removing the Bearer
+  const token = socket.handshake?.auth?.token?.split(" ")[1];
 
-  if (tokenBearer) {
-    // if token exists then get only the token by removing the 'Bearer'
-    const token = tokenBearer.split(" ")[1];
-
-    // verify token
-    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-      if (err) {
-        // call the next function with the err
-        // this will prevent the socket being connect to the server
-        // also emits "connect_error" event to the client
-        next(err);
-      } else {
-        // add a property to the socket
-        // that holds the decoded data (authentication payload) after verifying the token
-        socket.decoded = decoded;
-        next();
-      }
-    });
-  }
+  // verify token
+  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    if (err) {
+      // call the next function with the err
+      // this will prevent the socket being connect to the server
+      // also emits "connect_error" event to the client
+      next(err);
+    } else {
+      // add a property to the socket
+      // that holds the decoded data (authentication payload) after verifying the token
+      socket.decoded = decoded;
+      next();
+    }
+  });
+  
 });
 
 // verify jwt token that comes from client side with http request
@@ -173,18 +172,31 @@ async function run() {
     io.on("connection", (socket) => {
       console.log("New user connected...", socket.decoded);
 
-      // listen to the task:create event to save new task to db
+      // listen to the tasks:create event to save new task to db
       // and send response if successfuly saved
-      socket.on("task:create", async (newTask, callback) => {
+      socket.on("tasks:create", async (newTask, callback) => {
+        // add date of the task creation
+        // mongodb stores dates that are created in BE as utc dates
+        newTask.date = new Date();
         // insert the newTask to tasks collection
         const result = await tasks.insertOne(newTask);
         if (result.acknowledged) {
           // response after successful operation
-          callback({success: "Successfuly created the new task"});
+          callback({ success: "Successfuly created the new task" });
         }
       });
 
+      // listen to tasks:read event and get todays tasks for the doer that we recieve from client side
+      socket.on("tasks:read", async ({doer}) => {
+        // query with doer and today's date
+        // get the all the tasks of today
+        const query = {doer, date: { $gte: startOfToday()}};
+        const cursor = tasks.find(query);
+        const result = await cursor.toArray();
 
+        // send an event to the client to recieve the result
+        socket.emit("tasks:read", result);
+      });
     });
   } finally {
     // Ensures that the client will close when you finish/error
