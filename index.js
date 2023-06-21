@@ -5,7 +5,7 @@ const http = require("http");
 // get Server class from socket.io to create socket.io server
 const { Server } = require("socket.io");
 // mongodb db
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 // allow cross origin resource sharing
 const cors = require("cors");
 // jsonwebtoken package for jwt token implementation
@@ -65,7 +65,6 @@ io.use((socket, next) => {
       next();
     }
   });
-  
 });
 
 // verify jwt token that comes from client side with http request
@@ -187,15 +186,60 @@ async function run() {
       });
 
       // listen to tasks:read event and get todays tasks for the doer that we recieve from client side
-      socket.on("tasks:read", async ({doer}) => {
+      socket.on("tasks:read", async ({ doer }) => {
         // query with doer and today's date
         // get the all the tasks of today
-        const query = {doer, date: { $gte: startOfToday()}};
+        const query = { doer, date: { $gte: startOfToday() } };
         const cursor = tasks.find(query);
         const result = await cursor.toArray();
 
         // send an event to the client to recieve the result
         socket.emit("tasks:read", result);
+      });
+
+      // register the start time of a task's workedTimeSpan into db
+      socket.on("workedTimeSpan:start", async (_id, callback) => {
+        // filter the task by _id
+        // get the task and update workedTimeSpans array
+        const filter = { _id: new ObjectId(_id) };
+        // create the workedTimeSpan object with startTime property to push in workedTimeSpans
+        const workedTimeSpan = { startTime: new Date() };
+        // push workedTimeSpan to the workedTimeSpans array of the task
+        const result = await tasks.updateOne(filter, {
+          $push: { workedTimeSpans: workedTimeSpan },
+        });
+        // if successfuly pushed
+        if (result.modifiedCount) {
+          callback({ status: "OK", message: "Happy working!" });
+        }
+      });
+
+      // register the end time of a task's workedTimeSpan object into db
+      socket.on("workedTimeSpan:end", async (_id, lastTimeSpanIndex, callback) => {
+        console.log(lastTimeSpanIndex);
+
+        // filter the task by _id
+        // get the task and update the workedTimeSpans array's last object's endTime
+        const filter = { _id: new ObjectId(_id) };
+
+        const endTime = `workedTimeSpans.${lastTimeSpanIndex}.endTime`;
+
+        // do register the endTime of the task's workedTimeSpan
+        const result = await tasks.updateOne(
+          // filter the task from tasks
+          filter,
+          // add endTime property to the last object of workedTimeSpans array
+          {
+            $set: {
+              [endTime]: new Date(),
+            },
+          }
+        );
+
+        // if successfuly added endTime property
+        if (result.modifiedCount) {
+          callback({ status: "OK", message: "Work done!" });
+        }
       });
     });
   } finally {
