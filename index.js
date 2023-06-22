@@ -265,6 +265,14 @@ async function run() {
           }
         }
       );
+
+      // when workedTimeSpan is in progress, that means endTime is not registered to the object
+      // ex: workedTimeSpans: [....,{startTime: date}], endTime is not added to the object
+      // when in rogress, we emit "workedTimeSpan:continue" event from client side every 1 second 
+      socket.on("workedTimeSpan:continue", () => {
+        // after listening we emit "workedTimeSpan:continue" with the current time as the end time
+        socket.emit("workedTimeSpan:continue", new Date());
+      });
     });
   } finally {
     // Ensures that the client will close when you finish/error
