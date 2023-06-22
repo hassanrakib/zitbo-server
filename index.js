@@ -169,27 +169,36 @@ async function run() {
     // ********************
 
     io.on("connection", (socket) => {
-      console.log("New user connected...", socket.decoded);
+      const username = socket.decoded?.username;
+      console.log(`${username} connected`);
 
       // listen to the tasks:create event to save new task to db
       // and send response if successfuly saved
       socket.on("tasks:create", async (newTask, callback) => {
+        // add doer (username of the user)
+        newTask.doer = username;
         // add date of the task creation
         // mongodb stores dates that are created in BE as utc dates
         newTask.date = new Date();
         // insert the newTask to tasks collection
         const result = await tasks.insertOne(newTask);
+        // if successful insertion
         if (result.acknowledged) {
           // response after successful operation
           callback({ success: "Successfuly created the new task" });
+
+          // tasks collection changed after creating new task
+          // so need to emit "tasks:change" event that we are listening in TaskList component
+          // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
+          socket.emit("tasks:change");
         }
       });
 
       // listen to tasks:read event and get todays tasks for the doer that we recieve from client side
-      socket.on("tasks:read", async ({ doer }) => {
+      socket.on("tasks:read", async () => {
         // query with doer and today's date
         // get the all the tasks of today
-        const query = { doer, date: { $gte: startOfToday() } };
+        const query = { doer: username, date: { $gte: startOfToday() } };
         const cursor = tasks.find(query);
         const result = await cursor.toArray();
 
@@ -210,37 +219,52 @@ async function run() {
         });
         // if successfuly pushed
         if (result.modifiedCount) {
+          // give a response otherwise error will happen after the timeout
           callback({ status: "OK", message: "Happy working!" });
+
+          // tasks collection changed after a task document is modified
+          // so need to emit "tasks:change" event that we are listening in TaskList component
+          // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
+          socket.emit("tasks:change");
         }
       });
 
       // register the end time of a task's workedTimeSpan object into db
-      socket.on("workedTimeSpan:end", async (_id, lastTimeSpanIndex, callback) => {
-        console.log(lastTimeSpanIndex);
+      socket.on(
+        "workedTimeSpan:end",
+        async (_id, lastTimeSpanIndex, callback) => {
+          console.log(lastTimeSpanIndex);
 
-        // filter the task by _id
-        // get the task and update the workedTimeSpans array's last object's endTime
-        const filter = { _id: new ObjectId(_id) };
+          // filter the task by _id
+          // get the task and update the workedTimeSpans array's last object's endTime
+          const filter = { _id: new ObjectId(_id) };
 
-        const endTime = `workedTimeSpans.${lastTimeSpanIndex}.endTime`;
+          const endTime = `workedTimeSpans.${lastTimeSpanIndex}.endTime`;
 
-        // do register the endTime of the task's workedTimeSpan
-        const result = await tasks.updateOne(
-          // filter the task from tasks
-          filter,
-          // add endTime property to the last object of workedTimeSpans array
-          {
-            $set: {
-              [endTime]: new Date(),
-            },
+          // do register the endTime of the task's workedTimeSpan
+          const result = await tasks.updateOne(
+            // filter the task from tasks
+            filter,
+            // add endTime property to the last object of workedTimeSpans array
+            {
+              $set: {
+                [endTime]: new Date(),
+              },
+            }
+          );
+
+          // if successfuly added endTime property
+          if (result.modifiedCount) {
+            // give a response
+            callback({ status: "OK", message: "Work done!" });
+
+            // tasks collection changed after a task document is modified
+            // so need to emit "tasks:change" event that we are listening in TaskList component
+            // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
+            socket.emit("tasks:change");
           }
-        );
-
-        // if successfuly added endTime property
-        if (result.modifiedCount) {
-          callback({ status: "OK", message: "Work done!" });
         }
-      });
+      );
     });
   } finally {
     // Ensures that the client will close when you finish/error
