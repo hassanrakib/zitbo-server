@@ -188,14 +188,16 @@ async function run() {
           callback({ success: "Successfuly created the new task" });
 
           // tasks collection changed after creating new task
-          // so need to emit "tasks:change" event that we are listening in TaskList component
-          // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          socket.emit("tasks:change");
+          // so need to emit "tasks:change-by-create" event that we are listening in TaskList component
+          // the listener of "tasks:change-by-create" emits the "tasks:read" event to get the tasks
+          socket.emit("tasks:change-by-create");
         }
       });
 
-      // listen to tasks:read event and get todays tasks for the doer that we recieve from client side
-      socket.on("tasks:read", async () => {
+      // listen to tasks:read event and get todays tasks for the doer
+      // this listener recieves the activeTaskId
+      // if no activeTaskId recieved, activeTaskId is assigned a default value of empty string
+      socket.on("tasks:read", async (activeTaskId = "") => {
         // query with doer and today's date
         // get the all the tasks of today
         const query = { doer: username, date: { $gte: startOfToday() } };
@@ -203,7 +205,7 @@ async function run() {
         const result = await cursor.toArray();
 
         // send an event to the client to recieve the result
-        socket.emit("tasks:read", result);
+        socket.emit("tasks:read", { tasks: result, activeTaskId });
       });
 
       // register the start time of a task's workedTimeSpan into db
@@ -225,7 +227,8 @@ async function run() {
           // tasks collection changed after a task document is modified
           // so need to emit "tasks:change" event that we are listening in TaskList component
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          socket.emit("tasks:change");
+          // also, here we are sending the active task id that is what we recieved with the event above
+          socket.emit("tasks:change", _id);
         }
       });
 
@@ -268,7 +271,7 @@ async function run() {
 
       // when workedTimeSpan is in progress, that means endTime is not registered to the object
       // ex: workedTimeSpans: [....,{startTime: date}], endTime is not added to the object
-      // when in rogress, we emit "workedTimeSpan:continue" event from client side every 1 second 
+      // when in rogress, we emit "workedTimeSpan:continue" event from client side every 1 second
       socket.on("workedTimeSpan:continue", () => {
         // after listening we emit "workedTimeSpan:continue" with the current time as the end time
         socket.emit("workedTimeSpan:continue", new Date());
