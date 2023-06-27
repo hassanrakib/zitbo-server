@@ -235,14 +235,14 @@ async function run() {
       // register the end time of a task's workedTimeSpan object into db
       socket.on(
         "workedTimeSpan:end",
-        async (_id, lastTimeSpanIndex, callback) => {
-          console.log(lastTimeSpanIndex);
+        async (_id, lastTimeSpanIndex, endTime, callback) => {
 
           // filter the task by _id
           // get the task and update the workedTimeSpans array's last object's endTime
           const filter = { _id: new ObjectId(_id) };
 
-          const endTime = `workedTimeSpans.${lastTimeSpanIndex}.endTime`;
+          // add endTime property to the last workedTimeSpan object
+          const endTimeProperty = `workedTimeSpans.${lastTimeSpanIndex}.endTime`;
 
           // do register the endTime of the task's workedTimeSpan
           const result = await tasks.updateOne(
@@ -251,7 +251,8 @@ async function run() {
             // add endTime property to the last object of workedTimeSpans array
             {
               $set: {
-                [endTime]: new Date(),
+                // if endTime comes from client set endTime otherwise current date object
+                [endTimeProperty]: endTime ? endTime : new Date(),
               },
             }
           );
@@ -275,6 +276,11 @@ async function run() {
       socket.on("workedTimeSpan:continue", () => {
         // after listening we emit "workedTimeSpan:continue" with the current time as the end time
         socket.emit("workedTimeSpan:continue", new Date());
+      });
+
+      // listen to socket disconnect event
+      socket.on("disconnect", () => {
+        console.log("disconnected user is ", username);
       });
     });
   } finally {
