@@ -258,13 +258,17 @@ async function run() {
 
           // if successfuly added endTime property
           if (result.modifiedCount) {
-            // give a response
-            callback({ status: "OK", message: "Work done!" });
-
-            // tasks collection changed after a task document is modified
-            // so need to emit "tasks:change" event that we are listening in TaskList component
-            // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-            socket.emit("tasks:change");
+            // create an instantly resolved promise
+            // so that, we can call callback first then emit "tasks:change" event 
+            await Promise.resolve(
+              // give a response
+              callback({ status: "OK", message: "Work done!" })
+            ).then(() => {
+              // tasks collection changed after a task document is modified
+              // so need to emit "tasks:change" event that we are listening in TaskList component
+              // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
+              socket.emit("tasks:change");
+            });
           }
         }
       );
@@ -295,7 +299,7 @@ async function run() {
           // tasks collection changed after a task document is modified
           // so need to emit "tasks:change" event that we are listening in TaskList component
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          socket.emit("tasks:change", _id);
+          socket.emit("tasks:change");
         }
       });
 
