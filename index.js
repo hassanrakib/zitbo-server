@@ -208,6 +208,26 @@ async function run() {
         socket.emit("tasks:read", { tasks: result, activeTaskId });
       });
 
+      // listen to "tasks:delete" event to delete a task from the tasks collection
+      socket.on("tasks:delete", async (_id, activeTaskId, callback) => {
+        // query to find the specified task with its _id
+        const query = { _id: new ObjectId(_id) };
+
+        // delete
+        const result = await tasks.deleteOne(query);
+
+        if (result.deletedCount === 1) {
+          // call the callback after successfuly deleted the task
+          callback({ status: "OK", message: "Successfully deleted the task!" });
+
+          // tasks collection changed after a task document is deleted
+          // so need to emit "tasks:change" event that we are listening in TaskList component
+          // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
+          // also, here we are sending the active task id that is what we recieved with the event above
+          socket.emit("tasks:change", activeTaskId);
+        }
+      })
+
       // register the start time of a task's workedTimeSpan into db
       socket.on("workedTimeSpan:start", async (_id, callback) => {
         // filter the task by _id
