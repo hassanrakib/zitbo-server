@@ -234,7 +234,7 @@ async function run() {
         // get the task and update workedTimeSpans array
         const filter = { _id: new ObjectId(_id) };
         // create the workedTimeSpan object with startTime property to push in workedTimeSpans
-        const workedTimeSpan = { startTime: new Date() };
+        const workedTimeSpan = { _id: new ObjectId(), startTime: new Date() };
         // push workedTimeSpan to the workedTimeSpans array of the task
         const result = await tasks.updateOne(filter, {
           $push: { workedTimeSpans: workedTimeSpan },
