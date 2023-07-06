@@ -252,22 +252,25 @@ async function run() {
         }
       });
 
-      // register the end time of a task's workedTimeSpan object into db
+      // register the endTime of a task's workedTimeSpan object
       socket.on(
         "workedTimeSpan:end",
-        async (_id, lastTimeSpanIndex, endTime, callback) => {
-          // filter the task by _id
-          // get the task and update the workedTimeSpans array's last object's endTime
-          const filter = { _id: new ObjectId(_id) };
+        async (_id, workedTimeSpanId, endTime, callback) => {
+          // find the specified workedTimeSpan object in a specified task that we will add endTime
+          // _id helps to find the specified task
+          // "workedTimeSpans._id" here "workedTimeSpans" is the array that contains objects with "_id" property
+          // "workedTimeSpans._id" returns matched object whose _id is ObjectId(workedTimeSpanId)
+          const filter = { _id: new ObjectId(_id), "workedTimeSpans._id": new ObjectId(workedTimeSpanId) };
 
-          // add endTime property to the last workedTimeSpan object
-          const endTimeProperty = `workedTimeSpans.${lastTimeSpanIndex}.endTime`;
+          // add endTime property to the matched workedTimeSpan object
+          // here $ is the positional operator that refers the matched workedTimeSpan object
+          const endTimeProperty = `workedTimeSpans.$.endTime`;
 
           // do register the endTime of the task's workedTimeSpan
           const result = await tasks.updateOne(
-            // filter the task from tasks
+            // filter the specified workedTimeSpan in a specified task
             filter,
-            // add endTime property to the last object of workedTimeSpans array
+            // add endTime property to the matched workedTimeSpan object of workedTimeSpans array
             {
               $set: {
                 // if endTime comes from client set endTime otherwise current date object
@@ -303,15 +306,15 @@ async function run() {
 
       // delete the last workedTimeSpan object in a task's workedTimeSpans array
       // because we don't want to create any bug in the app while calculating
-      // completedTimeBeforeTaskActive
-      socket.on("workedTimeSpan:delete", async (_id) => {
+      // completedTimeBeforeTaskActiveRef
+      socket.on("workedTimeSpan:delete", async (_id, workedTimeSpanId) => {
         // filter the task by _id
         // get the task and update workedTimeSpans array
         const filter = { _id: new ObjectId(_id) };
 
-        // pop the last workedTimeSpan from the workedTimeSpans array of the task
+        // remove workedTimeSpan whose _id matches workedTimeSpanId
         const result = await tasks.updateOne(filter, {
-          $pop: { workedTimeSpans: 1 },
+          $pull: { workedTimeSpans: { _id: new ObjectId(workedTimeSpanId) } },
         });
 
         // if successfuly deleted the last workedTimeSpan object
