@@ -228,6 +228,25 @@ async function run() {
         }
       })
 
+      // update the taskName
+      socket.on("taskName:update", async (_id, updatedTaskName, activeTaskId, callback) => {
+        // filters the task by _id
+        const filter = { _id: new ObjectId(_id) };
+
+        // update
+        const result = await tasks.updateOne(filter, { $set: { name: updatedTaskName } });
+
+        // if successfully updated the task name
+        if (result.modifiedCount) {
+          // tasks collection changed after a task document is modified
+          // so need to emit "tasks:change" event that we are listening in TaskList component
+          // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
+          // also, here we are sending the active task id that is what we recieved with the event above
+          socket.emit("tasks:change", activeTaskId);
+          callback({ status: "OK", message: "Successfully updated the task name!" });
+        }
+      })
+
       // register the start time of a task's workedTimeSpan into db
       socket.on("workedTimeSpan:start", async (_id, callback) => {
         // filter the task by _id
@@ -304,17 +323,24 @@ async function run() {
         socket.emit("workedTimeSpan:continue", new Date());
       });
 
-      // delete the last workedTimeSpan object in a task's workedTimeSpans array
-      // because we don't want to create any bug in the app while calculating
-      // completedTimeBeforeTaskActiveRef
-      socket.on("workedTimeSpan:delete", async (_id, workedTimeSpanId) => {
+      // remove specified task's specified workedTimeSpan objects from workedTimeSpans array
+      // to specify workedTimeSpan objects, we are using their _ids.
+      socket.on("workedTimeSpan:delete", async (_id, workedTimeSpansIds, activeTaskId) => {
+
+        // create workedTimeSpansObjectIds array from workedTimeSpansIds
+        const workedTimeSpansObjectIds = workedTimeSpansIds.map(workedTimeSpanId => new ObjectId(workedTimeSpanId));
+
         // filter the task by _id
         // get the task and update workedTimeSpans array
         const filter = { _id: new ObjectId(_id) };
 
-        // remove workedTimeSpan whose _id matches workedTimeSpanId
+        // remove workedTimeSpan objects whose _id exists in workedTimeSpansObjectIds array
         const result = await tasks.updateOne(filter, {
-          $pull: { workedTimeSpans: { _id: new ObjectId(workedTimeSpanId) } },
+          // $pull operator removes elements
+          // workedTimeSpans is the array name
+          // _id is the property to match for each array element
+          // $in operator takes an array of ObjectId to check that element's _id is in it or not
+          $pull: { workedTimeSpans: { _id: { $in: workedTimeSpansObjectIds } } },
         });
 
         // if successfuly deleted the last workedTimeSpan object
@@ -322,7 +348,7 @@ async function run() {
           // tasks collection changed after a task document is modified
           // so need to emit "tasks:change" event that we are listening in TaskList component
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          socket.emit("tasks:change");
+          socket.emit("tasks:change", activeTaskId);
         }
       });
 
