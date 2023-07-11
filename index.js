@@ -365,13 +365,70 @@ async function run() {
         const startDate = new Date(dateAfterSubtraction.setUTCHours(0, 0, 0, 0));
 
         // aggregation to get an array of total completed times between startDate and endDate
-        const result = await tasks.aggregate([
+        const completedTimes = await tasks.aggregate([
           // filter out the tasks for a specific user and between startDate and endDate
           { $match: { doer: username, date: { $gte: startDate, $lte: endDate } } },
+          // replaceWith pipeline stage replaces the date field in every document
+          // to date string like "2023-07-11" 
+          {
+            $replaceWith:
+            {
+              $setField: {
+                field: "date",
+                input: "$$ROOT",
+                value: {
+                  $dateToString: {
+                    format: "%Y-%m-%d", date: "$date"
+                  }
+                },
+              }
+            }
+          },
+          // project stage removes all other fields from a document except date
+          // and then adds a new field named completedTime (that holds time in millisecond)
+          // $sum operator sums up all the number type elements in the array
+          // $map converts workedTimeSpans array field that was containing objects like
+          // {startTime: date, endTime: date} to an array of numbers.
+          // by using $dateDiff to calculate difference in millisecond between startTime & endTime
+          {
+            $project: {
+              _id: false,
+              date: true,
+              completedTime: {
+                $sum: {
+                  $map: {
+                    input: '$workedTimeSpans',
+                    as: 'workedTimeSpan',
+                    in: {
+                      $dateDiff: {
+                        startDate: "$$workedTimeSpan.startTime",
+                        endDate: "$$workedTimeSpan.endTime",
+                        unit: "millisecond"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          // $group stage groups all documents by date
+          // like, for every document that has "2023-07-11" date, $group operator will return
+          // a single document ex: {_id: "2023-07-11", completedTime: timeInMillisecond}
+          // here completedTime field contains the sum of completedTime field value of every
+          // document that has "2023-07-11" date
+          {
+            $group: {
+              _id: "$date",
+              completedTime: {
+                $sum: "$completedTime"
+              }
+            }
+          }
         ]).toArray();
 
 
-        console.log(result);
+        // after getting completedTimes call the callback
+        callback(completedTimes);
       });
 
       // listen to socket disconnect event
