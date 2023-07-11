@@ -11,7 +11,7 @@ const cors = require("cors");
 // jsonwebtoken package for jwt token implementation
 const jwt = require("jsonwebtoken");
 // date functions
-const { startOfToday } = require("date-fns");
+const { startOfToday, subDays, parseISO } = require("date-fns");
 // dot env package for .env file usage
 require("dotenv").config();
 
@@ -350,6 +350,28 @@ async function run() {
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           socket.emit("tasks:change", activeTaskId);
         }
+      });
+
+      // get an array of total completed times for a date range
+      socket.on("totalCompletedTimes:read", async (lastTaskDate, daysToSubtract, callback) => {
+        // endDate is the date object that is derived from the lastTaskDate string
+        const endDate = parseISO(lastTaskDate);
+
+        // subtract the number of days that we recieve in daysToSubtract parameter
+        const dateAfterSubtraction = subDays(endDate, daysToSubtract);
+
+        // get startDate from dateAfterSubtraction
+        // by setting hours minutes seconds and milliseconds to 0
+        const startDate = new Date(dateAfterSubtraction.setUTCHours(0, 0, 0, 0));
+
+        // aggregation to get an array of total completed times between startDate and endDate
+        const result = await tasks.aggregate([
+          // filter out the tasks for a specific user and between startDate and endDate
+          { $match: { doer: username, date: { $gte: startDate, $lte: endDate } } },
+        ]).toArray();
+
+
+        console.log(result);
       });
 
       // listen to socket disconnect event
