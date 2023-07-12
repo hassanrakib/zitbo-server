@@ -10,8 +10,6 @@ const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const cors = require("cors");
 // jsonwebtoken package for jwt token implementation
 const jwt = require("jsonwebtoken");
-// date functions
-const { startOfToday, subDays, parseISO } = require("date-fns");
 // dot env package for .env file usage
 require("dotenv").config();
 
@@ -195,12 +193,13 @@ async function run() {
       });
 
       // listen to tasks:read event and get todays tasks for the doer
+      // this listener recieves the start of today utc date string
       // this listener recieves the activeTaskId
       // if no activeTaskId recieved, activeTaskId is assigned a default value of empty string
-      socket.on("tasks:read", async (activeTaskId = "") => {
+      socket.on("tasks:read", async (startOfTodayString, activeTaskId = "") => {
         // query with doer and today's date
         // get the all the tasks of today
-        const query = { doer: username, date: { $gte: startOfToday() } };
+        const query = { doer: username, date: { $gte: new Date(startOfTodayString) } };
         const cursor = tasks.find(query);
         const result = await cursor.toArray();
 
@@ -293,7 +292,7 @@ async function run() {
             {
               $set: {
                 // if endTime comes from client set endTime otherwise current date object
-                [endTimeProperty]: endTime ? endTime : new Date(),
+                [endTimeProperty]: endTime ? new Date(endTime) : new Date(),
               },
             }
           );
@@ -353,23 +352,22 @@ async function run() {
       });
 
       // get an array of total completed times for a date range
-      socket.on("totalCompletedTimes:read", async (lastTaskDate, daysToSubtract, callback) => {
-        // endDate is the date object that is derived from the lastTaskDate string
-        const endDate = parseISO(lastTaskDate);
+      socket.on("totalCompletedTimes:read", async (startDateString, endDateString, timeZone, callback) => {
 
-        // subtract the number of days that we recieve in daysToSubtract parameter
-        const dateAfterSubtraction = subDays(endDate, daysToSubtract);
-
-        // get startDate from dateAfterSubtraction
-        // by setting hours minutes seconds and milliseconds to 0
-        const startDate = new Date(dateAfterSubtraction.setUTCHours(0, 0, 0, 0));
+        // convert utc date strings to date objects
+        const startDate = new Date(startDateString);
+        const endDate = new Date(endDateString);
 
         // aggregation to get an array of total completed times between startDate and endDate
         const completedTimes = await tasks.aggregate([
           // filter out the tasks for a specific user and between startDate and endDate
           { $match: { doer: username, date: { $gte: startDate, $lte: endDate } } },
-          // replaceWith pipeline stage replaces the date field in every document
-          // to date string like "2023-07-11" 
+          // sort matched documents from the endDate to the startDate 
+          {
+            $sort: { date: -1 }
+          },
+          // replaceWith pipeline stage replaces the date (in utc) field in every document
+          // to user's local timezone's date string like "2023-07-11" 
           {
             $replaceWith:
             {
@@ -378,9 +376,9 @@ async function run() {
                 input: "$$ROOT",
                 value: {
                   $dateToString: {
-                    format: "%Y-%m-%d", date: "$date"
+                    format: "%Y-%m-%d", date: "$date", timezone: timeZone
                   }
-                },
+                }
               }
             }
           },
@@ -425,7 +423,6 @@ async function run() {
             }
           }
         ]).toArray();
-
 
         // after getting completedTimes call the callback
         callback(completedTimes);
