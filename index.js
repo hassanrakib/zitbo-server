@@ -362,28 +362,11 @@ async function run() {
         const completedTimes = await tasks.aggregate([
           // filter out the tasks for a specific user and between startDate and endDate
           { $match: { doer: username, date: { $gte: startDate, $lte: endDate } } },
-          // sort matched documents from the endDate to the startDate 
-          {
-            $sort: { date: -1 }
-          },
-          // replaceWith pipeline stage replaces the date (in utc) field in every document
-          // to user's local timezone's date string like "2023-07-11" 
-          {
-            $replaceWith:
-            {
-              $setField: {
-                field: "date",
-                input: "$$ROOT",
-                value: {
-                  $dateToString: {
-                    format: "%Y-%m-%d", date: "$date", timezone: timeZone
-                  }
-                }
-              }
-            }
-          },
           // project stage removes all other fields from a document except date
-          // and then adds a new field named completedTime (that holds time in millisecond)
+          // then adds a new localDate field to every document
+          // it contains the converted date field value from utc date obj to
+          // user's local timezone's date string like "2023-07-11" 
+          // then adds another new field named completedTime (that holds time in millisecond)
           // $sum operator sums up all the number type elements in the array
           // $map converts workedTimeSpans array field that was containing objects like
           // {startTime: date, endTime: date} to an array of numbers.
@@ -391,6 +374,11 @@ async function run() {
           {
             $project: {
               _id: false,
+              localDate: {
+                $dateToString: {
+                  format: "%Y-%m-%d", date: "$date", timezone: timeZone
+                }
+              },
               date: true,
               completedTime: {
                 $sum: {
@@ -409,17 +397,25 @@ async function run() {
               }
             }
           },
-          // $group stage groups all documents by date
-          // like, for every document that has "2023-07-11" date, $group operator will return
-          // a single document ex: {_id: "2023-07-11", completedTime: timeInMillisecond}
+          // $group stage groups all documents by localDate
+          // like, for every document that has "2023-07-11" localDate, $group operator will return
+          // a single document ex: {_id: "2023-07-11", date: utcDate, completedTime: timeInMillisecond}
+          // date field contains the utc date of the date field of the first matched document for the group
           // here completedTime field contains the sum of completedTime field value of every
           // document that has "2023-07-11" date
           {
             $group: {
-              _id: "$date",
+              _id: "$localDate",
+              date: {$first: "$date"},
               completedTime: {
                 $sum: "$completedTime"
               }
+            }
+          },
+          // finally sort by date to make documents with earlier date come first
+          {
+            $sort: {
+              date: 1,
             }
           }
         ]).toArray();
