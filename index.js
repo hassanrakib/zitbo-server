@@ -354,7 +354,7 @@ async function run() {
       });
 
       // get an array of total completed times for a date range
-      socket.on("totalCompletedTimes:read", async (startDateString, endDateString, timeZone, callback) => {
+      socket.on("totalCompletedTimes:read", async (startDateString, endDateString, numberOfDaysCompletedTimes, timeZone, callback) => {
 
         // convert utc date strings to date objects
         const startDate = new Date(startDateString);
@@ -364,7 +364,7 @@ async function run() {
         const completedTimes = await tasks.aggregate([
           // filter out the tasks for a specific user and between startDate and endDate
           { $match: { doer: username, date: { $gte: startDate, $lte: endDate } } },
-          // project stage removes all other fields from a document except date
+          // project stage removes all the fields from a document
           // then adds a new localDate field to every document
           // it contains the converted date field value from utc date obj to
           // user's local timezone's date string like "2023-07-11" 
@@ -381,7 +381,6 @@ async function run() {
                   format: "%Y-%m-%d", date: "$date", timezone: timeZone
                 }
               },
-              date: true,
               completedTime: {
                 $sum: {
                   $map: {
@@ -401,23 +400,121 @@ async function run() {
           },
           // $group stage groups all documents by localDate
           // like, for every document that has "2023-07-11" localDate, $group operator will return
-          // a single document ex: {_id: "2023-07-11", date: utcDate, completedTime: timeInMillisecond}
-          // date field contains the utc date of the date field of the first matched document for the group
+          // a single document ex: {_id: "2023-07-11", completedTime: timeInMillisecond}
           // here completedTime field contains the sum of completedTime field value of every
           // document that has "2023-07-11" date
           {
             $group: {
               _id: "$localDate",
-              date: {$first: "$date"},
               completedTime: {
                 $sum: "$completedTime"
               }
             }
           },
-          // finally sort by date to make documents with earlier date come first
+          // $group stage creates a single document
+          // as we are not grouping by any specific field (_id is given null), we group all the documents in one document
+          // then push all the documents localDate and completedTime field wrapped in an object to existingDatesCompletedTimes
+          // output document: {_id: null, existingDatesCompletedTimes: [{localDate, completedTime}...]}
           {
-            $sort: {
-              date: 1,
+            $group: {
+              _id: null,
+              existingDatesCompletedTimes: {
+                $push: {
+                  localDate: "$_id",
+                  completedTime: "$completedTime",
+                }
+              }
+            }
+          },
+          // $project stage removes _id from the document
+          // keeps existingDatesCompletedTimes array
+          // creates a new array of allDatesInitialCompletedTimes
+          // allDatesInitialCompletedTimes creation steps:
+          // declare some variables inside $let operator's vars,
+          // 1. numberOfDaysCompletedTimes holds a number of how many days completed times we want (we actually recieve it from client side)
+          // 2. startDateInMs holds the converted startDate in millisecond, $toLong converts the date to ms
+          // 3. oneDayInMs, holds the number of milliseconds for a day
+          // use the variable declared in "vars" inside "in".
+          // $map operator's input array is [0, 1, 2, 3, ...to the numberOfDaysCompletedTimes(excluded)] created using $range
+          // named every array element as 'index'
+          // modifies every array element inside 'in' of the $map,
+          // declared more variables inside $let operator's vars
+          // currentDateInMs holds a calculated value where we add startDateInMs to the multiplication of index and oneDayInMs
+          // ex1: first array element is 0. first currentDateInMs is: 0 * oneDayInMs = 0, startDateInMs + 0 = startDateInMs
+          // ex2: second array element is 1. second currentDateInMs is: 1 * oneDayInMs = oneDayInMs, startDateInMs + onDayInMs = secondDateInMs
+          // then, we use currentDateInMs variable inside 'in' of the $let operator to get
+          // localDate, where $toDate converts the currentDateInMs to date object
+          // and add another new property completedTime set to 0
+          // final output: {exstingDatesCompletedTimes, allDatesCompletedTimes: [{localDate:'fromStart', completedTime: 0}...{localDate:'toEndInSerial', completedTime: 0}]}
+          {
+            $project: {
+              _id: false,
+              existingDatesCompletedTimes: true,
+              allDatesInitialCompletedTimes: {
+                $let: {
+                  vars: {
+                    numberOfDaysCompletedTimes: numberOfDaysCompletedTimes,
+                    startDateInMs: { $toLong: startDate },
+                    oneDayInMs: 24 * 60 * 60 * 1000
+                  },
+                  in: {
+                    $map: {
+                      input: { $range: [0, "$$numberOfDaysCompletedTimes"] },
+                      as: "index",
+                      in: {
+                        $let: {
+                          vars: {
+                            currentDateInMs: { $add: ["$$startDateInMs", { $multiply: ["$$index", "$$oneDayInMs"] }] },
+                          },
+                          in: {
+                            localDate: {
+                              $dateToString: {
+                                format: "%Y-%m-%d", date: { $toDate: "$$currentDateInMs" }, timezone: timeZone
+                              }
+                            },
+                            completedTime: 0,
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          // $project stage merges existingDatesCompletedTimes and allDatesInitialCompletedTimes to a single array named allDatesCompletedTimes
+          // firstly $map takes 'allDatesInitialCompletedTimes' as input array
+          // then modifies it inside 'in' of the $map ($$this is used to refer every array element of the input array)
+          // $cond takes an expression first and two values at the end inside an array
+          // first expression is the condition that resolves to a boolean value
+          // $in takes a value and an array. if the value is present in the array, returns true.
+          // if true, $arrayElemAt takes an array as the first value and index as the second value to return the element from the array
+          // $indexOfArray takes an array and a value to return the index.
+          // if the condition evaluates to false, return $$this. 
+          {
+            $project: {
+              allDatesCompletedTimes: {
+                $map: {
+                  input: "$allDatesInitialCompletedTimes",
+                  in: {
+                    $cond: [
+                      { $in: ["$$this.localDate", "$existingDatesCompletedTimes.localDate"] },
+                      {
+                        $arrayElemAt: [
+                          "$existingDatesCompletedTimes",
+                          {
+                            $indexOfArray: [
+                              "$existingDatesCompletedTimes.localDate",
+                              "$$this.localDate"
+                            ]
+                          }
+                        ]
+                      },
+                      "$$this"
+                    ]
+                  }
+                }
+              }
             }
           }
         ]).toArray();
