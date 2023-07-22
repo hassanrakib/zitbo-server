@@ -194,21 +194,20 @@ async function run() {
 
       // listen to tasks:read event and get todays tasks for the doer
       // this listener recieves the start of today utc date string
-      // this listener recieves the activeTaskId
-      // if no activeTaskId recieved, activeTaskId is assigned a default value of empty string
-      socket.on("tasks:read", async (startOfTodayString, activeTaskId = "") => {
+      socket.on("tasks:read", async (startDateString, endDateString, callback) => {
+
         // query with doer and today's date
         // get the all the tasks of today
-        const query = { doer: username, date: { $gte: new Date(startOfTodayString) } };
+        const query = { doer: username, date: { $gte: new Date(startDateString), $lte: new Date(endDateString) } };
         const cursor = tasks.find(query);
         const result = await cursor.toArray();
 
-        // send an event to the client to recieve the result
-        socket.emit("tasks:read", { tasks: result, activeTaskId });
+        // call the callback to recieve the result in the client side
+        callback({ tasks: result});
       });
 
       // listen to "tasks:delete" event to delete a task from the tasks collection
-      socket.on("tasks:delete", async (_id, activeTaskId, callback) => {
+      socket.on("tasks:delete", async (_id, activeTaskId, indexInTasksOfDays, callback) => {
         // query to find the specified task with its _id
         const query = { _id: new ObjectId(_id) };
 
@@ -223,12 +222,12 @@ async function run() {
           // so need to emit "tasks:change" event that we are listening in TaskList component
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           // also, here we are sending the active task id that is what we recieved with the event above
-          socket.emit("tasks:change", activeTaskId);
+          socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
         }
       })
 
       // update the taskName
-      socket.on("taskName:update", async (_id, updatedTaskName, activeTaskId, callback) => {
+      socket.on("taskName:update", async (_id, updatedTaskName, activeTaskId, indexInTasksOfDays, callback) => {
         // filters the task by _id
         const filter = { _id: new ObjectId(_id) };
 
@@ -241,13 +240,13 @@ async function run() {
           // so need to emit "tasks:change" event that we are listening in TaskList component
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           // also, here we are sending the active task id that is what we recieved with the event above
-          socket.emit("tasks:change", activeTaskId);
+          socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
           callback({ status: "OK", message: "Successfully updated the task name!" });
         }
       })
 
       // register the start time of a task's workedTimeSpan into db
-      socket.on("workedTimeSpan:start", async (_id, callback) => {
+      socket.on("workedTimeSpan:start", async (_id, indexInTasksOfDays, callback) => {
         // filter the task by _id
         // get the task and update workedTimeSpans array
         const filter = { _id: new ObjectId(_id) };
@@ -266,14 +265,14 @@ async function run() {
           // so need to emit "tasks:change" event that we are listening in TaskList component
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           // also, here we are sending the active task id that is what we recieved with the event above
-          socket.emit("tasks:change", _id);
+          socket.emit("tasks:change", indexInTasksOfDays, _id);
         }
       });
 
       // register the endTime of a task's workedTimeSpan object
       socket.on(
         "workedTimeSpan:end",
-        async (_id, workedTimeSpanId, endTime, callback) => {
+        async (_id, workedTimeSpanId, endTime, indexInTasksOfDays, callback) => {
           // find the specified workedTimeSpan object in a specified task that we will add endTime
           // _id helps to find the specified task
           // "workedTimeSpans._id" here "workedTimeSpans" is the array that contains objects with "_id" property
@@ -308,7 +307,7 @@ async function run() {
               // tasks collection changed after a task document is modified
               // so need to emit "tasks:change" event that we are listening in TaskList component
               // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-              socket.emit("tasks:change");
+              socket.emit("tasks:change", indexInTasksOfDays, "");
             });
           }
         }
@@ -326,7 +325,7 @@ async function run() {
 
       // remove specified task's specified workedTimeSpan objects from workedTimeSpans array
       // to specify workedTimeSpan objects, we are using their _ids.
-      socket.on("workedTimeSpan:delete", async (_id, workedTimeSpansIds, activeTaskId) => {
+      socket.on("workedTimeSpan:delete", async (_id, workedTimeSpansIds, activeTaskId, indexInTasksOfDays) => {
 
         // create workedTimeSpansObjectIds array from workedTimeSpansIds
         const workedTimeSpansObjectIds = workedTimeSpansIds.map(workedTimeSpanId => new ObjectId(workedTimeSpanId));
@@ -349,7 +348,7 @@ async function run() {
           // tasks collection changed after a task document is modified
           // so need to emit "tasks:change" event that we are listening in TaskList component
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          socket.emit("tasks:change", activeTaskId);
+          socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
         }
       });
 
