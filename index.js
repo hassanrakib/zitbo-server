@@ -203,7 +203,7 @@ async function run() {
         const result = await cursor.toArray();
 
         // call the callback to recieve the result in the client side
-        callback({ tasks: result});
+        callback({ tasks: result });
       });
 
       // listen to "tasks:delete" event to delete a task from the tasks collection
@@ -307,7 +307,9 @@ async function run() {
               // tasks collection changed after a task document is modified
               // so need to emit "tasks:change" event that we are listening in TaskList component
               // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-              socket.emit("tasks:change", indexInTasksOfDays, "");
+              if (indexInTasksOfDays) {
+                socket.emit("tasks:change", indexInTasksOfDays, "");
+              }
             });
           }
         }
@@ -361,68 +363,69 @@ async function run() {
 
         // aggregation to get an array of total completed times between startDate and endDate
         const completedTimes = await tasks.aggregate([
-          // filter out the tasks for a specific user and between startDate and endDate
-          { $match: { doer: username, date: { $gte: startDate, $lte: endDate } } },
-          // project stage removes all the fields from a document
-          // then adds a new localDate field to every document
-          // it contains the converted date field value from utc date obj to
-          // user's local timezone's date string like "2023-07-11" 
-          // then adds another new field named completedTime (that holds time in millisecond)
-          // $sum operator sums up all the number type elements in the array
-          // $map converts workedTimeSpans array field that was containing objects like
-          // {startTime: date, endTime: date} to an array of numbers.
-          // by using $dateDiff to calculate difference in millisecond between startTime & endTime
           {
-            $project: {
-              _id: false,
-              localDate: {
-                $dateToString: {
-                  format: "%Y-%m-%d", date: "$date", timezone: timeZone
-                }
-              },
-              completedTime: {
-                $sum: {
-                  $map: {
-                    input: '$workedTimeSpans',
-                    as: 'workedTimeSpan',
-                    in: {
-                      $dateDiff: {
-                        startDate: "$$workedTimeSpan.startTime",
-                        endDate: "$$workedTimeSpan.endTime",
-                        unit: "millisecond"
+            $facet: {
+              "existingDatesCompletedTimes": [
+                // filter out the tasks for a specific user and between startDate and endDate
+                { $match: { doer: username, date: { $gte: startDate, $lte: endDate } } },
+                // project stage removes all the fields from a document
+                // then adds a new localDate field to every document
+                // it contains the converted date field value from utc date obj to
+                // user's local timezone's date string like "2023-07-11" 
+                // then adds another new field named completedTime (that holds time in millisecond)
+                // $sum operator sums up all the number type elements in the array
+                // $map converts workedTimeSpans array field that was containing objects like
+                // {startTime: date, endTime: date} to an array of numbers.
+                // by using $dateDiff to calculate difference in millisecond between startTime & endTime
+                {
+                  $project: {
+                    _id: false,
+                    localDate: {
+                      $dateToString: {
+                        format: "%Y-%m-%d", date: "$date", timezone: timeZone
+                      }
+                    },
+                    completedTime: {
+                      $sum: {
+                        $map: {
+                          input: '$workedTimeSpans',
+                          as: 'workedTimeSpan',
+                          in: {
+                            $dateDiff: {
+                              startDate: "$$workedTimeSpan.startTime",
+                              endDate: "$$workedTimeSpan.endTime",
+                              unit: "millisecond"
+                            }
+                          }
+                        }
                       }
                     }
                   }
+                },
+                // $group stage groups all documents by localDate
+                // like, for every document that has "2023-07-11" localDate, $group operator will return
+                // a single document ex: {_id: "2023-07-11", completedTime: timeInMillisecond}
+                // here completedTime field contains the sum of completedTime field value of every
+                // document that has "2023-07-11" date
+                {
+                  $group: {
+                    _id: "$localDate",
+                    completedTime: {
+                      $sum: "$completedTime"
+                    }
+                  }
+                },
+                // remove _id property
+                // add localDate property and assign the _id property value to it
+                // keep completedTime property
+                {
+                  $project: {
+                    _id: false,
+                    localDate: "$_id",
+                    completedTime: true
+                  }
                 }
-              }
-            }
-          },
-          // $group stage groups all documents by localDate
-          // like, for every document that has "2023-07-11" localDate, $group operator will return
-          // a single document ex: {_id: "2023-07-11", completedTime: timeInMillisecond}
-          // here completedTime field contains the sum of completedTime field value of every
-          // document that has "2023-07-11" date
-          {
-            $group: {
-              _id: "$localDate",
-              completedTime: {
-                $sum: "$completedTime"
-              }
-            }
-          },
-          // $group stage creates a single document
-          // as we are not grouping by any specific field (_id is given null), we group all the documents in one document
-          // then push all the documents localDate and completedTime field wrapped in an object to existingDatesCompletedTimes
-          // output document: {_id: null, existingDatesCompletedTimes: [{localDate, completedTime}...]}
-          {
-            $group: {
-              _id: null,
-              existingDatesCompletedTimes: {
-                $push: {
-                  localDate: "$_id",
-                  completedTime: "$completedTime",
-                }
-              }
+              ]
             }
           },
           // $project stage removes _id from the document
@@ -447,8 +450,7 @@ async function run() {
           // final output: {exstingDatesCompletedTimes, allDatesCompletedTimes: [{localDate:'fromStart', completedTime: 0}...{localDate:'toEndInSerial', completedTime: 0}]}
           {
             $project: {
-              _id: false,
-              existingDatesCompletedTimes: true,
+              existingDatesCompletedTimes: "$existingDatesCompletedTimes",
               allDatesInitialCompletedTimes: {
                 $let: {
                   vars: {
