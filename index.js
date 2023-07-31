@@ -219,7 +219,7 @@ async function run() {
           callback({ status: "OK", message: "Successfully deleted the task!" });
 
           // tasks collection changed after a task document is deleted
-          // so need to emit "tasks:change" event that we are listening in TaskList component
+          // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           // also, here we are sending the active task id that is what we recieved with the event above
           socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
@@ -237,7 +237,7 @@ async function run() {
         // if successfully updated the task name
         if (result.modifiedCount) {
           // tasks collection changed after a task document is modified
-          // so need to emit "tasks:change" event that we are listening in TaskList component
+          // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           // also, here we are sending the active task id that is what we recieved with the event above
           socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
@@ -262,7 +262,7 @@ async function run() {
           callback({ status: "OK", message: "Happy working!" });
 
           // tasks collection changed after a task document is modified
-          // so need to emit "tasks:change" event that we are listening in TaskList component
+          // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           // also, here we are sending the active task id that is what we recieved with the event above
           socket.emit("tasks:change", indexInTasksOfDays, _id);
@@ -270,6 +270,7 @@ async function run() {
       });
 
       // register the endTime of a task's workedTimeSpan object
+      // indexInTasksOfDays is the index of the object in the tasksOfDays state
       socket.on(
         "workedTimeSpan:end",
         async (_id, workedTimeSpanId, endTime, indexInTasksOfDays, callback) => {
@@ -305,9 +306,12 @@ async function run() {
               callback({ status: "OK", message: "Work done!" })
             ).then(() => {
               // tasks collection changed after a task document is modified
-              // so need to emit "tasks:change" event that we are listening in TaskList component
+              // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
               // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
+              // check if indexInTasksOfDays exist because useTasksOfDays hook checks localStorage for endTime
+              // and if endTime exist it registers endTime then read tasks without listening tasks:change event
               if (indexInTasksOfDays) {
+                // sending last empty string to clear the activeTaskId state
                 socket.emit("tasks:change", indexInTasksOfDays, "");
               }
             });
@@ -348,7 +352,7 @@ async function run() {
         // if successfuly deleted the last workedTimeSpan object
         if (result.modifiedCount) {
           // tasks collection changed after a task document is modified
-          // so need to emit "tasks:change" event that we are listening in TaskList component
+          // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
         }
