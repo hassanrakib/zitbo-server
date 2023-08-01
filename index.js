@@ -310,9 +310,9 @@ async function run() {
               // tasks collection changed after a task document is modified
               // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
               // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-              // check if indexInTasksOfDays exist because useTasksOfDays hook checks localStorage for endTime
+              // check if indexInTasksOfDays undefined because useTasksOfDays hook checks localStorage for endTime
               // and if endTime exist it registers endTime then read tasks without listening tasks:change event
-              if (indexInTasksOfDays) {
+              if (typeof indexInTasksOfDays !== "undefined") {
                 // sending last empty string to clear the activeTaskId state
                 socket.emit("tasks:change", indexInTasksOfDays, "");
               }
