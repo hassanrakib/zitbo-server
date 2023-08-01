@@ -186,9 +186,11 @@ async function run() {
           callback({ success: "Successfuly created the new task" });
 
           // tasks collection changed after creating new task
-          // so need to emit "tasks:change-by-create" event that we are listening in TaskList component
-          // the listener of "tasks:change-by-create" emits the "tasks:read" event to get the tasks
-          socket.emit("tasks:change-by-create");
+          // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
+          // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
+          // here we are sending indexInTasksOfDays as 0, because every task is created for the current date
+          // and current date's tasks are in the first object of the tasksOfDays 
+          socket.emit("tasks:change", 0);
         }
       });
 
@@ -207,7 +209,7 @@ async function run() {
       });
 
       // listen to "tasks:delete" event to delete a task from the tasks collection
-      socket.on("tasks:delete", async (_id, activeTaskId, indexInTasksOfDays, callback) => {
+      socket.on("tasks:delete", async (_id, isTaskActive, indexInTasksOfDays, callback) => {
         // query to find the specified task with its _id
         const query = { _id: new ObjectId(_id) };
 
@@ -221,13 +223,14 @@ async function run() {
           // tasks collection changed after a task document is deleted
           // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          // also, here we are sending the active task id that is what we recieved with the event above
-          socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
+          // if the task is active (isTaskActive >> true), after delete there will be no activeTaskId
+          // that's why sending empty string for activeTaskId. otherwise sending undefined to not change activeTaskId state
+          socket.emit("tasks:change", indexInTasksOfDays, isTaskActive ? "" : undefined);
         }
       })
 
       // update the taskName
-      socket.on("taskName:update", async (_id, updatedTaskName, activeTaskId, indexInTasksOfDays, callback) => {
+      socket.on("taskName:update", async (_id, updatedTaskName, indexInTasksOfDays, callback) => {
         // filters the task by _id
         const filter = { _id: new ObjectId(_id) };
 
@@ -239,8 +242,7 @@ async function run() {
           // tasks collection changed after a task document is modified
           // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          // also, here we are sending the active task id that is what we recieved with the event above
-          socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
+          socket.emit("tasks:change", indexInTasksOfDays);
           callback({ status: "OK", message: "Successfully updated the task name!" });
         }
       })
@@ -264,7 +266,7 @@ async function run() {
           // tasks collection changed after a task document is modified
           // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          // also, here we are sending the active task id that is what we recieved with the event above
+          // also, here we are sending the activeTaskId that is what we recieved as _id with the event above
           socket.emit("tasks:change", indexInTasksOfDays, _id);
         }
       });
@@ -331,7 +333,7 @@ async function run() {
 
       // remove specified task's specified workedTimeSpan objects from workedTimeSpans array
       // to specify workedTimeSpan objects, we are using their _ids.
-      socket.on("workedTimeSpan:delete", async (_id, workedTimeSpansIds, activeTaskId, indexInTasksOfDays) => {
+      socket.on("workedTimeSpan:delete", async (_id, workedTimeSpansIds, indexInTasksOfDays) => {
 
         // create workedTimeSpansObjectIds array from workedTimeSpansIds
         const workedTimeSpansObjectIds = workedTimeSpansIds.map(workedTimeSpanId => new ObjectId(workedTimeSpanId));
@@ -354,7 +356,7 @@ async function run() {
           // tasks collection changed after a task document is modified
           // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          socket.emit("tasks:change", indexInTasksOfDays, activeTaskId);
+          socket.emit("tasks:change", indexInTasksOfDays);
         }
       });
 
