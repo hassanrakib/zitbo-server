@@ -530,6 +530,59 @@ async function run() {
         callback(completedTimes);
       });
 
+      // get the dates that have tasks created by the user
+      socket.on("existingDates:read", async (timeZone, callback) => {
+        const existingDates = await tasks.aggregate([
+          // match stage filters the tasks collection and gets user's tasks
+          {
+            $match: { doer: username }
+          },
+          // convert utc dates in date property of every document to local date string using the timezone that we recieve
+          // remove _id property from every document
+          // output documents {date: utcDate, localDate: "2023-08-01"}
+          {
+            $project: {
+              _id: false,
+              date: true,
+              localDate: {
+                $dateToString: {
+                  format: "%Y-%m-%d", date: "$date", timezone: timeZone
+                }
+              },
+            }
+          },
+          // group same localDates documents to single one
+          // keep the first matched document's date
+          // output documents {_id: "2023-08-01", date: utcDate}
+          {
+            $group: {
+              _id: "$localDate",
+              date: { $first: "$date" }
+            }
+          },
+          // sort input documents by date in descending order
+          {
+            $sort: { date: -1 }
+          },
+          // create a single document using _id: null
+          // and push all the input documents _id (that holds local date string)
+          // to the localDates property of the single document
+          // output document {_id: null, localDates: ["2023-08-01", ...]}
+          {
+            $group: {
+              _id: null,
+              localDates: {
+                $push: "$_id"
+              }
+            }
+          }
+
+        ]).toArray();
+
+        // send the data to client side
+        callback(existingDates);
+      });
+
       // listen to socket disconnect event
       socket.on("disconnect", () => {
         console.log("disconnected user is ", username);
