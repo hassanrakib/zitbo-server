@@ -39,6 +39,10 @@ const client = new MongoClient(uri, {
   },
 });
 
+// roomsStates variable to store states of rooms
+// roomsStates will look like {roomName: {}, roomName: {}}
+const roomsStates = {};
+
 // middlewares
 app.use(cors());
 app.use(express.json());
@@ -177,6 +181,22 @@ async function run() {
       // the room name is the username of the user
       socket.join(username);
 
+      // update state of a room
+      // we can use the state to send necessary information stored here to the newly connected socket to the same room
+      // for now, we are updating state of room only with {activeTaskId}
+      socket.on("roomState:update", (state) => {
+        // update the room state
+        roomsStates[username] = state;
+      });
+
+      socket.on("roomState:read", (callback) => {
+        // if roomsStates variable contains state of a room
+        // the room name is the username
+        if (roomsStates[username]) {
+          callback(roomsStates[username]);
+        }
+      })
+
       // listen to the tasks:create event to save new task to db
       // and send response if successfuly saved
       socket.on("tasks:create", async (newTask, callback) => {
@@ -197,7 +217,7 @@ async function run() {
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           // here we are sending indexInTasksOfDays as 0, because every task is created for the current date
           // and current date's tasks are in the first object of the tasksOfDays
-           
+
           // emit event to the username room so that multiple devices (sockets) of the same user gets the event
           io.to(username).emit("tasks:change", 0);
         }
@@ -234,7 +254,7 @@ async function run() {
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
           // if the task is active (isTaskActive >> true), after delete there will be no activeTaskId
           // that's why sending empty string for activeTaskId. otherwise sending undefined to not change activeTaskId state
-          
+
           // emit event to the username room so that multiple devices (sockets) of the same user gets the event
           io.to(username).emit("tasks:change", indexInTasksOfDays, isTaskActive ? "" : undefined);
         }
@@ -373,7 +393,7 @@ async function run() {
           // tasks collection changed after a task document is modified
           // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
           // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-          
+
           // emit event to the username room so that multiple devices (sockets) of the same user gets the event
           io.to(username).emit("tasks:change", indexInTasksOfDays);
         }
