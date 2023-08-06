@@ -334,31 +334,9 @@ async function run() {
       socket.on(
         "workedTimeSpan:end",
         async (_id, workedTimeSpanId, endTime, indexInTasksOfDays, callback) => {
-          // find the specified workedTimeSpan object in a specified task that we will add endTime
-          // _id helps to find the specified task
-          // "workedTimeSpans._id" here "workedTimeSpans" is the array that contains objects with "_id" property
-          // "workedTimeSpans._id" returns matched object whose _id is ObjectId(workedTimeSpanId)
-          const filter = { _id: new ObjectId(_id), "workedTimeSpans._id": new ObjectId(workedTimeSpanId) };
 
-          // add endTime property to the matched workedTimeSpan object
-          // here $ is the positional operator that refers the matched workedTimeSpan object
-          const endTimeProperty = `workedTimeSpans.$.endTime`;
-
-          // do register the endTime of the task's workedTimeSpan
-          const result = await tasks.updateOne(
-            // filter the specified workedTimeSpan in a specified task
-            filter,
-            // add endTime property to the matched workedTimeSpan object of workedTimeSpans array
-            {
-              $set: {
-                // if endTime comes from client set endTime otherwise current date object
-                [endTimeProperty]: endTime ? new Date(endTime) : new Date(),
-              },
-            }
-          );
-
-          // if successfuly added endTime property
-          if (result.modifiedCount) {
+          // send response using this function
+          async function sendResponse() {
             // create an instantly resolved promise
             // so that, we can call callback first then emit "tasks:change" event 
             await Promise.resolve(
@@ -377,6 +355,57 @@ async function run() {
                 io.to(username).emit("tasks:change", indexInTasksOfDays, "");
               }
             });
+          }
+
+          // find the specified workedTimeSpan object in a specified task that we will add endTime
+          // _id helps to find the specified task
+          // "workedTimeSpans._id" here "workedTimeSpans" is the array that contains objects with "_id" property
+          // "workedTimeSpans._id" returns matched object whose _id is ObjectId(workedTimeSpanId)
+          const filter = { _id: new ObjectId(_id), "workedTimeSpans._id": new ObjectId(workedTimeSpanId) };
+
+          // but, before adding endTime to the matched workedTimeSpan object
+          // check if endTime exists in that workedTimeSpan object
+          // scenerio: one user is connected from two devices means two sockets in the same room
+          // now, if one device goes offline, it will save endTime in localStorage
+          // and if user doesn't leave the application when the device is offline
+          // application will continuously try to save the endTime in localStorage to database
+          // as soon as the device gets reconnected, 'workedTimeSpan:end' event will be emitted from the application.
+          // but on the oterhand, another device that is connected can register endTime
+          // so, to avoid the reconnection to update endTime again checking is needed
+
+          // get the task first
+          const task = await tasks.findOne({ _id: new ObjectId(_id) });
+          // get the last workedTimeSpan object to check if it has endTime property
+          const workedTimeSpans = task.workedTimeSpans;
+
+          // if no endTime then we can proceed to register endTime
+          if (!workedTimeSpans[workedTimeSpans.length - 1].endTime) {
+
+            // add endTime property to the matched workedTimeSpan object
+            // here $ is the positional operator that refers the matched workedTimeSpan object
+            const endTimeProperty = `workedTimeSpans.$.endTime`;
+
+            // do register the endTime of the task's workedTimeSpan
+            const result = await tasks.updateOne(
+              // filter the specified workedTimeSpan in a specified task
+              filter,
+              // add endTime property to the matched workedTimeSpan object of workedTimeSpans array
+              {
+                $set: {
+                  // if endTime comes from client set endTime otherwise current date object
+                  [endTimeProperty]: endTime ? new Date(endTime) : new Date(),
+                },
+              }
+            );
+
+            // if successfuly added endTime property
+            if (result.modifiedCount) {
+              sendResponse();
+            }
+          } else {
+            // if endTime exists no need to register it to the workedTimeSpan object
+            // just send a response
+            sendResponse();
           }
         }
       );
