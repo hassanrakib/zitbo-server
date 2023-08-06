@@ -39,10 +39,6 @@ const client = new MongoClient(uri, {
   },
 });
 
-// roomsStates variable to store states of rooms
-// roomsStates will look like {roomName: {}, roomName: {}}
-const roomsStates = {};
-
 // middlewares
 app.use(cors());
 app.use(express.json());
@@ -103,8 +99,12 @@ async function run() {
 
     // database and collections
     const db = client.db("zitbo-1_db-1");
+    // users collection contains registered users
     const users = db.collection("users");
+    // tasks collection contains created tasks by different users
     const tasks = db.collection("tasks");
+    // roomsStates collection contains states of different rooms
+    const roomsStates = db.collection("roomsStates");
 
     // ********************
 
@@ -182,18 +182,41 @@ async function run() {
       socket.join(username);
 
       // update state of a room
-      // we can use the state to send necessary information stored here to the newly connected socket to the same room
-      // for now, we are updating state of room only with {activeTaskId}
-      socket.on("roomState:update", (state) => {
-        // update the room state
-        roomsStates[username] = state;
+      // we will use the room's state that is stored in db
+      // to send necessary information to the newly connected socket to the same room
+      // for now, we are updating activeTaskId
+      socket.on("roomState:update", async (activeTaskId, callback) => {
+        // filter out specific room's state
+        const filter = { room: username };
+        // instruct updateOne method to create a document if no document matched the filter
+        const options = { upsert: true }
+        // new state
+        const updateState = {
+          $set: {
+            // set activeTaskId of the room state
+            activeTaskId: activeTaskId,
+          }
+        };
+
+        // updateOne operaton
+        const result = await roomsStates.updateOne(filter, updateState, options);
+
+        // if successfuly updated the room state
+        if (result.acknowledged) {
+          callback({ status: "OK", message: "Room states updated!" });
+        }
       });
 
-      socket.on("roomState:read", (callback) => {
-        // if roomsStates variable contains state of a room
-        // the room name is the username
-        if (roomsStates[username]) {
-          callback(roomsStates[username]);
+      socket.on("roomState:read", async (callback) => {
+        // query to find the room state
+        const query = { room: username };
+
+        // find the room state
+        const roomState = await roomsStates.findOne(query);
+
+        // if room state found in db call the callback with the room state
+        if (roomState) {
+          callback(roomState);
         }
       })
 
@@ -625,6 +648,25 @@ async function run() {
       // listen to socket disconnect event
       socket.on("disconnect", () => {
         console.log("disconnected user is ", username);
+
+        // delete a room state
+        async function deleteARoomState() {
+          // get the number of sockets(users) in a room
+          const numberOfSocketsInARoom = io.of("/").adapter.rooms.get(username)?.size;
+
+          // if no socket(user) in a room
+          if (!numberOfSocketsInARoom) {
+            // then delete the room state
+
+            // filters out the room state
+            const query = { room: username };
+
+            // do the delete operation
+            await roomsStates.deleteOne(query);
+          }
+        }
+
+        deleteARoomState();
       });
     });
   } finally {
