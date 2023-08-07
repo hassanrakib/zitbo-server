@@ -333,7 +333,7 @@ async function run() {
       // indexInTasksOfDays is the index of the object in the tasksOfDays state
       socket.on(
         "workedTimeSpan:end",
-        async (_id, workedTimeSpanId, endTime, indexInTasksOfDays, callback) => {
+        async (_id, workedTimeSpanId, endTime, wasDisconnected, indexInTasksOfDays, callback) => {
 
           // send response using this function
           async function sendResponse() {
@@ -357,29 +357,42 @@ async function run() {
             });
           }
 
-          // find the specified workedTimeSpan object in a specified task that we will add endTime
-          // _id helps to find the specified task
-          // "workedTimeSpans._id" here "workedTimeSpans" is the array that contains objects with "_id" property
-          // "workedTimeSpans._id" returns matched object whose _id is ObjectId(workedTimeSpanId)
-          const filter = { _id: new ObjectId(_id), "workedTimeSpans._id": new ObjectId(workedTimeSpanId) };
-
-          // but, before adding endTime to the matched workedTimeSpan object
-          // check if endTime exists in that workedTimeSpan object
+          // but, before adding endTime to the workedTimeSpan object
+          // the scenerio below needs to be handled
           // scenerio: one user is connected from two devices means two sockets in the same room
           // now, if one device goes offline, it will save endTime in localStorage
           // and if user doesn't leave the application when the device is offline
           // application will continuously try to save the endTime in localStorage to database
           // as soon as the device gets reconnected, 'workedTimeSpan:end' event will be emitted from the application.
-          // but on the oterhand, another device that is connected can register endTime
+          // but on the oterhand, another device that is connected can already register endTime
           // so, to avoid the reconnection to update endTime again checking is needed
+
+          // another case: the connected device still kept the task active that means it didn't register
+          // endTime to the database
+          // but reconnection from disconnected device will try to save the endTime in localStorage to db
+          // so, to avoid the reconnecion to register endTime
+          // we check whether room state contains activeTaskId
+          // note that we delete room state when there is no socket in the room
+          // we clear activeTaskId in room state when workedTimeSpan:end successfuly registers endTime
+          // if room state has activeTaskId that means another socket of the same user kept the task
+          // active no need to register endTime from reconnected device
+          const roomState = await roomsStates.findOne({ room: username });
+          const activeTaskId = roomState.activeTaskId;
 
           // get the task first
           const task = await tasks.findOne({ _id: new ObjectId(_id) });
           // get the last workedTimeSpan object to check if it has endTime property
           const workedTimeSpans = task.workedTimeSpans;
 
-          // if no endTime then we can proceed to register endTime
+
+          // if no endTime && no activeTaskId then we can proceed to register endTime
           if (!workedTimeSpans[workedTimeSpans.length - 1].endTime) {
+
+            // find the specified workedTimeSpan object in a specified task that we will add endTime
+            // _id helps to find the specified task
+            // "workedTimeSpans._id" here "workedTimeSpans" is the array that contains objects with "_id" property
+            // "workedTimeSpans._id" returns matched object whose _id is ObjectId(workedTimeSpanId)
+            const filter = { _id: new ObjectId(_id), "workedTimeSpans._id": new ObjectId(workedTimeSpanId) };
 
             // add endTime property to the matched workedTimeSpan object
             // here $ is the positional operator that refers the matched workedTimeSpan object
