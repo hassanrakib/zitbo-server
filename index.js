@@ -194,7 +194,8 @@ async function run() {
         const updateState = {
           $set: {
             // set activeTaskId of the room state
-            activeTaskId: activeTaskId,
+            // activeTaskId will be null when activeTaskId sent as undefined
+            activeTaskId: activeTaskId || "",
           }
         };
 
@@ -334,9 +335,10 @@ async function run() {
       socket.on(
         "workedTimeSpan:end",
         async (_id, workedTimeSpanId, endTime, wasDisconnected, indexInTasksOfDays, callback) => {
-
           // send response using this function
-          async function sendResponse() {
+          // by default activeTaskId is set to empty string
+          // that means if activeTaskId sent as undefined or not sent then activeTaskId will be empty string
+          async function sendResponse(activeTaskId = "") {
             // create an instantly resolved promise
             // so that, we can call callback first then emit "tasks:change" event 
             await Promise.resolve(
@@ -346,16 +348,22 @@ async function run() {
               // tasks collection changed after a task document is modified
               // so need to emit "tasks:change" event that we are listening in useTasksOfDays hook
               // the listener of "tasks:change" emits the "tasks:read" event to get the tasks
-              // check if indexInTasksOfDays undefined because useTasksOfDays hook checks localStorage for endTime
-              // and if endTime exist it registers endTime then read tasks without listening tasks:change event
-              if (typeof indexInTasksOfDays !== "undefined") {
-                // sending last empty string to clear the activeTaskId state
-
+              // check if indexInTasksOfDays greater than or equals to 0 because useTasksOfDays hook checks localStorage for endTime
+              // and if endTime exist it emits "workedTimeSpan:end" event
+              // sending indexInTasksOfDay as -1 then read tasks without listening tasks:change event
+              if (indexInTasksOfDays >= 0) {
                 // emit event to the username room so that multiple devices (sockets) of the same user gets the event
-                io.to(username).emit("tasks:change", indexInTasksOfDays, "");
+                io.to(username).emit("tasks:change", indexInTasksOfDays, activeTaskId);
               }
             });
           }
+
+          // find the specified task with specified workedTimeSpan object in its workedTimeSpans array
+          // _id helps to find the specified task
+          // "workedTimeSpans" is the array that contains objects with "_id" property
+          // "workedTimeSpans._id" ensures that the specified workedTimeSpan object 
+          // whose _id is ObjectId(workedTimeSpanId) is present in the task's workedTimeSpans array
+          const filter = { _id: new ObjectId(_id), "workedTimeSpans._id": new ObjectId(workedTimeSpanId) };
 
           // but, before adding endTime to the workedTimeSpan object
           // the scenerio below needs to be handled
@@ -372,52 +380,53 @@ async function run() {
           // but reconnection from disconnected device will try to save the endTime in localStorage to db
           // so, to avoid the reconnecion to register endTime
           // we check whether room state contains activeTaskId
-          // note that we delete room state when there is no socket in the room
+          // note that we delete room state when there is no socket in the room (in this case activeTaskId will be undefined)
           // we clear activeTaskId in room state when workedTimeSpan:end successfuly registers endTime
           // if room state has activeTaskId that means another socket of the same user kept the task
           // active no need to register endTime from reconnected device
           const roomState = await roomsStates.findOne({ room: username });
-          const activeTaskId = roomState.activeTaskId;
+          const activeTaskId = roomState?.activeTaskId;
 
-          // get the task first
-          const task = await tasks.findOne({ _id: new ObjectId(_id) });
-          // get the last workedTimeSpan object to check if it has endTime property
-          const workedTimeSpans = task.workedTimeSpans;
+          // get the specified task with only that workedTimeSpan object
+          // in workedTimeSpans array of the task which matches workedTimeSpanId
+          // the second parameter is a projection that keeps only the matched workedTimeSpan in workedTimeSpans array
+          // output: {_id: "", name: "", workedTimeSpans: [{matchedWorkedTimeSpan}]}
+          const task = await tasks.findOne(filter, {projection: {"workedTimeSpans.$": 1}});
 
+          console.log(task);
 
-          // if no endTime && no activeTaskId then we can proceed to register endTime
-          if (!workedTimeSpans[workedTimeSpans.length - 1].endTime) {
+          // we may delete the task or task's any workedTimeSpan
+          // in this scenerio, we may try to save that endTime to db taking it from localStorage
+          // if the task is not found task is null
+          // if its null or no workedTimeSpan in the workedTimeSpans array
 
-            // find the specified workedTimeSpan object in a specified task that we will add endTime
-            // _id helps to find the specified task
-            // "workedTimeSpans._id" here "workedTimeSpans" is the array that contains objects with "_id" property
-            // "workedTimeSpans._id" returns matched object whose _id is ObjectId(workedTimeSpanId)
-            const filter = { _id: new ObjectId(_id), "workedTimeSpans._id": new ObjectId(workedTimeSpanId) };
+          // or matched workedTimeSpan's endTime property exists where we want to register endTime
+          // or the socket was disconnected and the socket room state has activeTaskId
+          // we don't allow registering endTime
+          if ( !task || task.workedTimeSpans.length === 0 || task.workedTimeSpans[0].endTime || (wasDisconnected && activeTaskId)) {
+            // return from here to avoid registering endTime
+            return sendResponse(activeTaskId);
+          }
 
-            // add endTime property to the matched workedTimeSpan object
-            // here $ is the positional operator that refers the matched workedTimeSpan object
-            const endTimeProperty = `workedTimeSpans.$.endTime`;
+          // add endTime property to the matched workedTimeSpan object
+          // here $ is the positional operator that refers the matched workedTimeSpan object
+          const endTimeProperty = `workedTimeSpans.$.endTime`;
 
-            // do register the endTime of the task's workedTimeSpan
-            const result = await tasks.updateOne(
-              // filter the specified workedTimeSpan in a specified task
-              filter,
-              // add endTime property to the matched workedTimeSpan object of workedTimeSpans array
-              {
-                $set: {
-                  // if endTime comes from client set endTime otherwise current date object
-                  [endTimeProperty]: endTime ? new Date(endTime) : new Date(),
-                },
-              }
-            );
-
-            // if successfuly added endTime property
-            if (result.modifiedCount) {
-              sendResponse();
+          // do register the endTime of the task's workedTimeSpan
+          const result = await tasks.updateOne(
+            // filter the specified workedTimeSpan in a specified task
+            filter,
+            // add endTime property to the matched workedTimeSpan object of workedTimeSpans array
+            {
+              $set: {
+                // if endTime comes from client set endTime otherwise current date object
+                [endTimeProperty]: endTime ? new Date(endTime) : new Date(),
+              },
             }
-          } else {
-            // if endTime exists no need to register it to the workedTimeSpan object
-            // just send a response
+          );
+
+          // if successfuly added endTime property
+          if (result.modifiedCount) {
             sendResponse();
           }
         }
