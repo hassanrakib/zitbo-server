@@ -46,7 +46,7 @@ app.use(express.json());
 // socket server middlewares
 // this is executed only for the first time at the time of connecting
 io.use((socket, next) => {
-  // get the token by removing the Bearer
+  // get the token by removing the "Bearer"
   const token = socket.handshake?.auth?.token?.split(" ")[1];
 
   // verify token
@@ -247,12 +247,12 @@ async function run() {
         }
       });
 
-      // listen to tasks:read event and get todays tasks for the doer
-      // this listener recieves the start of today utc date string
+      // listen to tasks:read event and get a day's tasks of a user
+      // this listener recieves the startDate and endDate of a day in utc date string
       socket.on("tasks:read", async (startDateString, endDateString, callback) => {
 
-        // query with doer and today's date
-        // get the all the tasks of today
+        // query with doer and date
+        // get the all the tasks between startDateString and endDateString 
         const query = { doer: username, date: { $gte: new Date(startDateString), $lte: new Date(endDateString) } };
         const cursor = tasks.find(query);
         const result = await cursor.toArray();
@@ -392,8 +392,6 @@ async function run() {
           // the second parameter is a projection that keeps only the matched workedTimeSpan in workedTimeSpans array
           // output: {_id: "", name: "", workedTimeSpans: [{matchedWorkedTimeSpan}]}
           const task = await tasks.findOne(filter, {projection: {"workedTimeSpans.$": 1}});
-
-          console.log(task);
 
           // we may delete the task or task's any workedTimeSpan
           // in this scenerio, we may try to save that endTime to db taking it from localStorage
