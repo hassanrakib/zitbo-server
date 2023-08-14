@@ -731,5 +731,5 @@ app.get("/", (req, res) => {
 
 // listen to the port from http server
 server.listen(port, () => {
-  console.log(`Zitbo server is running in port ${port}`);
+  console.log(`zitbo server is running in port ${port}`);
 });
