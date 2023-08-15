@@ -95,7 +95,7 @@ async function run() {
     await client.connect();
     // send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
-    console.log("You successfully connected to MongoDB!");
+    console.log("successfully connected to mongodb...");
 
     // database and collections
     const db = client.db("zitbo-1_db-1");
@@ -172,7 +172,7 @@ async function run() {
 
     io.on("connection", (socket) => {
       const username = socket.decoded?.username;
-      console.log(`${username} connected`);
+      console.log(`${username} connected...`);
 
       // if the same user uses multiple devices
       // for every device a new socket instance will be connected to the server
@@ -696,7 +696,7 @@ async function run() {
 
       // listen to socket disconnect event
       socket.on("disconnect", () => {
-        console.log("disconnected user is ", username);
+        console.log(`${username} disconnected...`);
 
         // delete a room state
         async function deleteARoomState() {
@@ -726,10 +726,10 @@ async function run() {
 run().catch(console.dir);
 
 app.get("/", (req, res) => {
-  res.send("Welcome to zitbo server!");
+  res.send({status: "OK", message: "server up and running!"});
 });
 
 // listen to the port from http server
 server.listen(port, () => {
-  console.log(`zitbo server is running in port ${port}`);
+  console.log(`server is running in port ${port}...`);
 });
